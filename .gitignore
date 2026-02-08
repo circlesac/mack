@@ -1,3 +1,5 @@
 /build/
 /node_modules/
 /.idea/
+.claude/settings.local.json
+package-lock.json

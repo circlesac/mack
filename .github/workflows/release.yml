@@ -1,40 +1,43 @@
 name: Release
+
 on:
-  release:
-    types: [published]
   workflow_dispatch:
+    inputs:
+      env:
+        type: choice
+        description: Environment
+        default: production
+        options:
+          - production
+          - dev
 
 jobs:
-  publish-npm:
-    name: Publish on NPM
+  release:
     runs-on: ubuntu-latest
-
+    permissions:
+      id-token: write
+      contents: write
     steps:
-      - uses: actions/checkout@v2
-
-      - name: Set up Node.js for NPM
-        uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
         with:
-          registry-url: 'https://registry.npmjs.org'
-
-      - run: npm ci
-      - run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-  publish-gpr:
-    name: Publish on GPR
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v2
-
-      - name: Set up Node.js for GPR
-        uses: actions/setup-node@v3
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
         with:
-          registry-url: 'https://npm.pkg.github.com/'
+          node-version: "lts/*"
+      - uses: oven-sh/setup-bun@v2
 
-      - run: npm ci
-      - run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: bun install --frozen-lockfile
+      - run: bun test
+
+      - run: npm install -g @circlesac/oneup
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          oneup version
+
+      - uses: actions/setup-node@v4
+        with:
+          registry-url: "https://registry.npmjs.org"
+      - run: npm publish --tag ${{ inputs.env == 'production' && 'latest' || inputs.env }}
+
+      - run: git push origin master --follow-tags

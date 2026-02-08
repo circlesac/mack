@@ -1,0 +1,578 @@
+import { readFileSync } from "fs"
+import { join } from "path"
+import { markdownToBlocks } from "../src"
+import * as slack from "../src/slack"
+
+const fixturesDir = join(__dirname, "fixtures")
+
+function readFixture(name: string): string {
+	return readFileSync(join(fixturesDir, `${name}.md`), "utf-8")
+}
+
+describe("integration with unified", () => {
+	it("should parse raw markdown into slack blocks", async () => {
+		const text = `
+a **b** _c_ **_d_ e**
+
+# heading **a**
+
+![59953191-480px](https://user-images.githubusercontent.com/16073505/123464383-b8715300-d5ba-11eb-8586-b1f965e1f18d.jpg)
+
+<img src="https://user-images.githubusercontent.com/16073505/123464383-b8715300-d5ba-11eb-8586-b1f965e1f18d.jpg" alt="59953191-480px"/>
+
+> block quote **a**
+> block quote b
+
+[link](https://apple.com)
+
+- bullet _a_
+- bullet _b_
+
+1. number _a_
+2. number _b_
+
+- [ ] checkbox false
+- [x] checkbox true
+
+| Syntax      | Description |
+| ----------- | ----------- |
+| Header      | Title       |
+| Paragraph   | Text        |
+`
+
+		const actual = await markdownToBlocks(text)
+
+		// Paragraph
+		expect(actual[0]).toStrictEqual(slack.section("a *b* _c_ *_d_ e*"))
+
+		// Heading
+		expect(actual[1]).toStrictEqual(slack.header("heading a"))
+
+		// Markdown image
+		expect(actual[2]).toStrictEqual(slack.image("https://user-images.githubusercontent.com/16073505/123464383-b8715300-d5ba-11eb-8586-b1f965e1f18d.jpg", "59953191-480px"))
+
+		// HTML image
+		expect(actual[3]).toStrictEqual(slack.image("https://user-images.githubusercontent.com/16073505/123464383-b8715300-d5ba-11eb-8586-b1f965e1f18d.jpg", "59953191-480px"))
+
+		// Blockquote -> rich_text_quote
+		expect(actual[4]).toMatchObject({
+			type: "rich_text",
+			elements: [
+				{
+					type: "rich_text_quote",
+					elements: [{ type: "text", text: "block quote " }, { type: "text", text: "a", style: { bold: true } }, { type: "text" }]
+				}
+			]
+		})
+
+		// Link
+		expect(actual[5]).toStrictEqual(slack.section("<https://apple.com|link> "))
+
+		// Bullet list -> rich_text_list
+		expect(actual[6]).toMatchObject({
+			type: "rich_text",
+			elements: [
+				{
+					type: "rich_text_list",
+					style: "bullet",
+					elements: [
+						{
+							type: "rich_text_section",
+							elements: [
+								{ type: "text", text: "bullet " },
+								{ type: "text", text: "a", style: { italic: true } }
+							]
+						},
+						{
+							type: "rich_text_section",
+							elements: [
+								{ type: "text", text: "bullet " },
+								{ type: "text", text: "b", style: { italic: true } }
+							]
+						}
+					]
+				}
+			]
+		})
+
+		// Ordered list -> rich_text_list
+		expect(actual[7]).toMatchObject({
+			type: "rich_text",
+			elements: [{ type: "rich_text_list", style: "ordered" }]
+		})
+
+		// Checkbox list -> rich_text_list with checkbox prefix
+		expect(actual[8]).toMatchObject({
+			type: "rich_text",
+			elements: [
+				{
+					type: "rich_text_list",
+					style: "bullet",
+					elements: [
+						{
+							type: "rich_text_section",
+							elements: [
+								{ type: "text", text: "\u2610 " },
+								{ type: "text", text: "checkbox false" }
+							]
+						},
+						{
+							type: "rich_text_section",
+							elements: [
+								{ type: "text", text: "\u2611 " },
+								{ type: "text", text: "checkbox true" }
+							]
+						}
+					]
+				}
+			]
+		})
+
+		// Table -> native table block
+		expect(actual[9]).toMatchObject({
+			type: "table",
+			rows: [
+				[
+					{ type: "raw_text", text: "Syntax" },
+					{ type: "raw_text", text: "Description" }
+				],
+				[
+					{ type: "raw_text", text: "Header" },
+					{ type: "raw_text", text: "Title" }
+				],
+				[
+					{ type: "raw_text", text: "Paragraph" },
+					{ type: "raw_text", text: "Text" }
+				]
+			]
+		})
+	})
+
+	it("should parse long markdown", async () => {
+		const text: string = new Array(3500).fill("a").join("") + "bbbcccdddeee"
+
+		const actual = await markdownToBlocks(text)
+
+		const expected = [slack.section(text.slice(0, 3000))]
+
+		expect(actual).toStrictEqual(expected)
+	})
+
+	describe("code blocks", () => {
+		it("should parse code blocks with no language", async () => {
+			const text = `\`\`\`
+if (a === 'hi') {
+  console.log('hi!')
+} else {
+  console.log('hello')
+}
+\`\`\``
+
+			const actual = await markdownToBlocks(text)
+
+			const expected = [slack.richTextCode("if (a === 'hi') {\n  console.log('hi!')\n} else {\n  console.log('hello')\n}")]
+
+			expect(actual).toStrictEqual(expected)
+		})
+
+		it("should parse code blocks with language", async () => {
+			const text = `\`\`\`javascript
+if (a === 'hi') {
+  console.log('hi!')
+} else {
+  console.log('hello')
+}
+\`\`\``
+
+			const actual = await markdownToBlocks(text)
+
+			const expected = [slack.richTextCode("if (a === 'hi') {\n  console.log('hi!')\n} else {\n  console.log('hello')\n}")]
+
+			expect(actual).toStrictEqual(expected)
+		})
+	})
+
+	it("should correctly escape text", async () => {
+		const actual = await markdownToBlocks("<>&'\"\"'&><")
+		const expected = [slack.section("&lt;&gt;&amp;'\"\"'&amp;&gt;&lt;")]
+		expect(actual).toStrictEqual(expected)
+	})
+
+	describe("slack special formatting in rich text", () => {
+		it("should parse user mentions in blockquotes", async () => {
+			const actual = await markdownToBlocks("> hello <@U12345>")
+			expect(actual[0]).toMatchObject({
+				type: "rich_text",
+				elements: [
+					{
+						type: "rich_text_quote",
+						elements: [
+							{ type: "text", text: "hello " },
+							{ type: "user", user_id: "U12345" }
+						]
+					}
+				]
+			})
+		})
+
+		it("should parse channel links in list items", async () => {
+			const actual = await markdownToBlocks("- see <#C12345>")
+			expect(actual[0]).toMatchObject({
+				type: "rich_text",
+				elements: [
+					{
+						type: "rich_text_list",
+						elements: [
+							{
+								type: "rich_text_section",
+								elements: [
+									{ type: "text", text: "see " },
+									{ type: "channel", channel_id: "C12345" }
+								]
+							}
+						]
+					}
+				]
+			})
+		})
+
+		it("should parse broadcast mentions in list items", async () => {
+			// Note: <!here> is parsed as HTML by marked at block level.
+			// Within list items it appears as escaped text &lt;!here&gt;.
+			const actual = await markdownToBlocks("- <!here> please review")
+			expect(actual[0]).toMatchObject({
+				type: "rich_text",
+				elements: [
+					{
+						type: "rich_text_list",
+						elements: [
+							{
+								type: "rich_text_section",
+								elements: [
+									{ type: "broadcast", range: "here" },
+									{ type: "text", text: " please review" }
+								]
+							}
+						]
+					}
+				]
+			})
+		})
+
+		it("should parse usergroup mentions in list items", async () => {
+			const actual = await markdownToBlocks("- cc <!subteam^S12345>")
+			expect(actual[0]).toMatchObject({
+				type: "rich_text",
+				elements: [
+					{
+						type: "rich_text_list",
+						elements: [
+							{
+								type: "rich_text_section",
+								elements: [
+									{ type: "text", text: "cc " },
+									{ type: "usergroup", usergroup_id: "S12345" }
+								]
+							}
+						]
+					}
+				]
+			})
+		})
+	})
+
+	describe("video support", () => {
+		it("should parse HTML video tags", async () => {
+			const actual = await markdownToBlocks('<video src="https://example.com/video.mp4" poster="https://example.com/thumb.jpg" title="My Video" alt="A video"/>')
+			expect(actual).toHaveLength(1)
+			expect(actual[0]).toMatchObject({
+				type: "video",
+				video_url: "https://example.com/video.mp4",
+				thumbnail_url: "https://example.com/thumb.jpg",
+				title: { type: "plain_text", text: "My Video" },
+				alt_text: "A video"
+			})
+		})
+	})
+
+	describe("validation", () => {
+		it("should throw on empty input", async () => {
+			await expect(markdownToBlocks("")).rejects.toThrow("Input cannot be empty")
+		})
+
+		it("should throw on null input", async () => {
+			await expect(markdownToBlocks(null as unknown as string)).rejects.toThrow("Input cannot be null or undefined")
+		})
+	})
+
+	describe("fixture: headings", () => {
+		it("should convert headings to header blocks", async () => {
+			const blocks = await markdownToBlocks(readFixture("headings"))
+
+			const headerBlocks = blocks.filter((b) => b.type === "header")
+			expect(headerBlocks).toHaveLength(3)
+
+			expect(headerBlocks[0]).toMatchObject({
+				type: "header",
+				text: { type: "plain_text", text: "Hello World" }
+			})
+			expect(headerBlocks[1]).toMatchObject({
+				type: "header",
+				text: { type: "plain_text", text: "Subheading" }
+			})
+			expect(headerBlocks[2]).toMatchObject({
+				type: "header",
+				text: { type: "plain_text", text: "Sub-subheading" }
+			})
+		})
+
+		it("should produce paragraph blocks between headings", async () => {
+			const blocks = await markdownToBlocks(readFixture("headings"))
+
+			// Should have headings and paragraphs interleaved
+			expect(blocks.length).toBeGreaterThanOrEqual(6)
+
+			// Paragraphs should be section blocks
+			const sectionBlocks = blocks.filter((b) => b.type === "section")
+			expect(sectionBlocks.length).toBeGreaterThanOrEqual(3)
+		})
+	})
+
+	describe("fixture: tables with alignment", () => {
+		it("should parse tables with various alignments", async () => {
+			const blocks = await markdownToBlocks(readFixture("tables"))
+
+			const tableBlocks = blocks.filter((b) => b.type === "table")
+			expect(tableBlocks).toHaveLength(6)
+		})
+
+		it("should have column_settings for aligned tables", async () => {
+			const blocks = await markdownToBlocks(readFixture("tables"))
+
+			const tableBlocks = blocks.filter((b) => b.type === "table") as slack.TableBlock[]
+
+			// Tables with non-default alignment should have column_settings
+			const withAlignment = tableBlocks.filter((t) => t.column_settings && t.column_settings.length > 0)
+			const withoutAlignment = tableBlocks.filter((t) => !t.column_settings || t.column_settings.length === 0)
+
+			expect(withAlignment.length).toBeGreaterThan(0)
+			expect(withoutAlignment.length).toBeGreaterThan(0)
+		})
+
+		it("should parse right-aligned columns", async () => {
+			const blocks = await markdownToBlocks("| Name | Salary |\n| ---: | ---: |\n| Alice | $100 |")
+			const tableBlock = blocks.find((b) => b.type === "table") as slack.TableBlock
+			expect(tableBlock).toBeDefined()
+			expect(tableBlock.column_settings).toBeDefined()
+			expect(tableBlock.column_settings![0]).toMatchObject({ align: "right" })
+			expect(tableBlock.column_settings![1]).toMatchObject({ align: "right" })
+		})
+
+		it("should parse center-aligned columns", async () => {
+			const blocks = await markdownToBlocks("| Name | Salary |\n| :---: | :---: |\n| Alice | $100 |")
+			const tableBlock = blocks.find((b) => b.type === "table") as slack.TableBlock
+			expect(tableBlock).toBeDefined()
+			expect(tableBlock.column_settings).toBeDefined()
+			expect(tableBlock.column_settings![0]).toMatchObject({ align: "center" })
+		})
+
+		it("should parse mixed alignment columns", async () => {
+			const blocks = await markdownToBlocks("| Name | Dept | Salary |\n| :--- | :---: | ---: |\n| A | B | $100 |")
+			const tableBlock = blocks.find((b) => b.type === "table") as slack.TableBlock
+			expect(tableBlock).toBeDefined()
+			expect(tableBlock.column_settings).toBeDefined()
+			// Left-aligned is default, so first column may be empty
+			// Center and right should be set
+		})
+	})
+
+	describe("fixture: lists", () => {
+		it("should parse simple ordered and unordered lists", async () => {
+			const blocks = await markdownToBlocks(readFixture("lists"))
+
+			const richTextBlocks = blocks.filter((b) => b.type === "rich_text")
+			expect(richTextBlocks.length).toBeGreaterThan(0)
+		})
+
+		it("should handle nested unordered lists", async () => {
+			const blocks = await markdownToBlocks("- Item 1\n  - Sub 1.1\n  - Sub 1.2\n- Item 2")
+
+			expect(blocks.length).toBeGreaterThan(0)
+			expect(blocks[0]).toMatchObject({ type: "rich_text" })
+		})
+
+		it("should handle nested ordered lists", async () => {
+			const blocks = await markdownToBlocks("1. Item 1\n   1. Sub 1.1\n   2. Sub 1.2\n2. Item 2")
+
+			expect(blocks.length).toBeGreaterThan(0)
+			expect(blocks[0]).toMatchObject({ type: "rich_text" })
+		})
+	})
+
+	describe("fixture: blockquotes", () => {
+		it("should parse simple blockquote", async () => {
+			const blocks = await markdownToBlocks("> This is a simple blockquote")
+			expect(blocks[0]).toMatchObject({
+				type: "rich_text",
+				elements: [
+					{
+						type: "rich_text_quote",
+						elements: [{ type: "text", text: "This is a simple blockquote" }]
+					}
+				]
+			})
+		})
+
+		it("should parse blockquote with formatting", async () => {
+			const blocks = await markdownToBlocks("> This is a **bold** blockquote with _italic_ text")
+			expect(blocks[0]).toMatchObject({
+				type: "rich_text",
+				elements: [
+					{
+						type: "rich_text_quote",
+						elements: [
+							{ type: "text", text: "This is a " },
+							{ type: "text", text: "bold", style: { bold: true } },
+							{ type: "text", text: " blockquote with " },
+							{ type: "text", text: "italic", style: { italic: true } },
+							{ type: "text", text: " text" }
+						]
+					}
+				]
+			})
+		})
+
+		it("should parse blockquote with link", async () => {
+			const blocks = await markdownToBlocks("> Blockquote with a [link](https://example.com)")
+			expect(blocks[0]).toMatchObject({
+				type: "rich_text",
+				elements: [
+					{
+						type: "rich_text_quote",
+						elements: [
+							{ type: "text", text: "Blockquote with a " },
+							{
+								type: "link",
+								url: "https://example.com",
+								text: "link"
+							}
+						]
+					}
+				]
+			})
+		})
+
+		it("should parse all blockquote fixtures", async () => {
+			const blocks = await markdownToBlocks(readFixture("blockquote"))
+			// 4 blockquotes in the fixture
+			const richTextBlocks = blocks.filter((b) => b.type === "rich_text")
+			expect(richTextBlocks.length).toBeGreaterThanOrEqual(4)
+		})
+	})
+
+	describe("fixture: strong links in list items", () => {
+		it("should handle bold links in list items", async () => {
+			const markdown = `- __[pica](https://nodeca.github.io/pica/demo/)__ - high quality and fast image
+resize in browser.
+- __[babelfish](https://github.com/nodeca/babelfish/)__ - developer friendly
+i18n with plurals support and easy syntax.`
+			const blocks = await markdownToBlocks(markdown)
+
+			expect(blocks.length).toBeGreaterThan(0)
+
+			const listBlock = blocks.find((b) => b.type === "rich_text")
+			expect(listBlock).toBeDefined()
+
+			if (listBlock && listBlock.type === "rich_text") {
+				const listElement = (listBlock as slack.RichTextBlock).elements.find((e) => e.type === "rich_text_list")
+				expect(listElement).toBeDefined()
+			}
+		})
+	})
+
+	describe("fixture: slack special formatting in paragraphs", () => {
+		it("should parse user mentions in paragraphs", async () => {
+			const blocks = await markdownToBlocks("Hello <@U12345> how are you?")
+			const allText = JSON.stringify(blocks)
+			expect(allText).toContain('"type":"section"')
+			// User mentions in section blocks use mrkdwn format
+			expect(allText).toContain("&lt;@U12345&gt;")
+		})
+
+		it("should parse slack formatting in list items", async () => {
+			const markdown = `- User: <@U12345>
+- Channel: <#C12345>
+- Link: <https://example.com|Example>`
+			const blocks = await markdownToBlocks(markdown)
+			const allText = JSON.stringify(blocks)
+
+			expect(allText).toContain('"type":"user"')
+			expect(allText).toContain('"user_id":"U12345"')
+			expect(allText).toContain('"type":"channel"')
+			expect(allText).toContain('"channel_id":"C12345"')
+		})
+	})
+
+	describe("fixture: sample2 comprehensive markdown", () => {
+		it("should parse a full markdown document", async () => {
+			const blocks = await markdownToBlocks(readFixture("sample2"))
+
+			// Should produce many blocks
+			expect(blocks.length).toBeGreaterThan(10)
+
+			// Should have headers
+			const headers = blocks.filter((b) => b.type === "header")
+			expect(headers.length).toBeGreaterThan(0)
+
+			// Should have rich_text blocks (lists, code, blockquotes)
+			const richText = blocks.filter((b) => b.type === "rich_text")
+			expect(richText.length).toBeGreaterThan(0)
+
+			// Should have tables
+			const tables = blocks.filter((b) => b.type === "table")
+			expect(tables.length).toBeGreaterThan(0)
+
+			// Should have images
+			const images = blocks.filter((b) => b.type === "image")
+			expect(images.length).toBeGreaterThan(0)
+		})
+	})
+
+	describe("fixture: sample3 complex markdown", () => {
+		it("should parse complex markdown without errors", async () => {
+			const blocks = await markdownToBlocks(readFixture("sample3"))
+
+			expect(blocks.length).toBeGreaterThan(10)
+
+			// Should have dividers (from ---)
+			const dividers = blocks.filter((b) => b.type === "divider")
+			expect(dividers.length).toBeGreaterThan(0)
+
+			// Should have headers
+			const headers = blocks.filter((b) => b.type === "header")
+			expect(headers.length).toBeGreaterThan(0)
+
+			// Should have tables
+			const tables = blocks.filter((b) => b.type === "table")
+			expect(tables.length).toBeGreaterThan(0)
+
+			// Should have images
+			const images = blocks.filter((b) => b.type === "image")
+			expect(images.length).toBeGreaterThan(0)
+
+			// Should have code blocks
+			const codeBlocks = blocks.filter((b) => {
+				if (b.type !== "rich_text") return false
+				const rt = b as slack.RichTextBlock
+				return rt.elements.some((e) => e.type === "rich_text_preformatted")
+			})
+			expect(codeBlocks.length).toBeGreaterThan(0)
+		})
+	})
+
+	it("should handle horizontal rule", async () => {
+		const blocks = await markdownToBlocks("---")
+		expect(blocks).toHaveLength(1)
+		expect(blocks[0].type).toBe("divider")
+	})
+})
