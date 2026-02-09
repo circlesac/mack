@@ -50,7 +50,7 @@ export type { ListOptions, ParsingOptions } from "./types"
 export async function markdownToBlocks(body: string, options: ParsingOptions = {}): Promise<(KnownBlock | TableBlock | RichTextBlock | VideoBlock)[]> {
 	validateInput(body)
 
-	const lexer = new marked.Lexer()
+	const lexer = new marked.Lexer({ ...marked.defaults, mangle: false })
 
 	// Override inlineText to prevent marked's default HTML entity escaping.
 	// We want raw text so that:
