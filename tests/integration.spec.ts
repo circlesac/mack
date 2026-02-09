@@ -489,8 +489,8 @@ i18n with plurals support and easy syntax.`
 			const blocks = await markdownToBlocks("Hello <@U12345> how are you?")
 			const allText = JSON.stringify(blocks)
 			expect(allText).toContain('"type":"section"')
-			// User mentions in section blocks use mrkdwn format
-			expect(allText).toContain("&lt;@U12345&gt;")
+			// User mentions in section blocks are preserved as Slack mrkdwn syntax
+			expect(allText).toContain("<@U12345>")
 		})
 
 		it("should parse slack formatting in list items", async () => {

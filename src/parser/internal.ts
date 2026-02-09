@@ -39,11 +39,17 @@ type PhrasingToken =
 let recursionDepth = 0
 
 /**
- * Escapes &, <, > for Slack mrkdwn format.
+ * Escapes &, <, > for Slack mrkdwn format while preserving Slack special
+ * patterns: <@U…>, <#C…>, <!here>, <!channel>, <!everyone>, <https://…>.
  * Only used in the section/mrkdwn code path (not rich_text).
  */
+const SLACK_MRKDWN_PATTERN = /(<(?:@[A-Z0-9]+(?:\|[^>]+)?|#[A-Z0-9]+(?:\|[^>]+)?|![a-z]+(?:\^[^>]+)*(?:\|[^>]+)?|https?:\/\/[^>]+)>)/g
+
 function escapeForMrkdwn(text: string): string {
-	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+	return text
+		.split(SLACK_MRKDWN_PATTERN)
+		.map((part, i) => (i % 2 === 1 ? part : part.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")))
+		.join("")
 }
 
 function parsePlainText(element: PhrasingToken): string[] {
@@ -78,8 +84,16 @@ function parseMrkdwn(element: Exclude<PhrasingToken, marked.Tokens.Image>): stri
 
 		switch (element.type) {
 			case "link": {
-				const href = element.href && validateUrl(element.href) ? element.href : ""
-				if (!href) {
+				const href = element.href || ""
+				// Handle Slack pipe format: <url|text> parsed as autolink by marked
+				const pipeIndex = href.indexOf("|")
+				if (pipeIndex > 0) {
+					const url = href.slice(0, pipeIndex)
+					if (validateUrl(url)) {
+						return `<${url}|${href.slice(pipeIndex + 1)}>`
+					}
+				}
+				if (!validateUrl(href)) {
 					return element.tokens.flatMap((child) => parseMrkdwn(child as Exclude<PhrasingToken, marked.Tokens.Image>)).join("")
 				}
 				return `<${href}|${element.tokens.flatMap((child) => parseMrkdwn(child as Exclude<PhrasingToken, marked.Tokens.Image>)).join("")}> `
