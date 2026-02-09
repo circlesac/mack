@@ -50,22 +50,13 @@ export type { ListOptions, ParsingOptions } from "./types"
 export async function markdownToBlocks(body: string, options: ParsingOptions = {}): Promise<(KnownBlock | TableBlock | RichTextBlock | VideoBlock)[]> {
 	validateInput(body)
 
-	// Slack only wants &, <, and > escaped
-	// https://api.slack.com/reference/surfaces/formatting#escaping
-	const replacements: Record<string, string> = {
-		"&": "&amp;",
-		"<": "&lt;",
-		">": "&gt;"
-	}
-
 	const lexer = new marked.Lexer()
 
-	// Override inlineText to escape &, <, > for Slack while preserving
-	// the default raw-consumption behavior (so inline formatting like
-	// **bold** and _italic_ continues to be parsed correctly).
-	// We use the default regex to determine how much text to consume,
-	// then apply Slack-specific escaping (only &, <, >) on the raw text
-	// instead of marked's default escape() which also escapes " and '.
+	// Override inlineText to prevent marked's default HTML entity escaping.
+	// We want raw text so that:
+	// 1. Rich text elements (lists, blockquotes, tables) contain unescaped text
+	// 2. Slack special formatting (<@USER>, <!here>, etc.) can be matched with simple regex
+	// 3. Only the mrkdwn code path escapes &, <, > (via escapeForMrkdwn)
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const tokenizer = (lexer as any).tokenizer
 	const origInlineText = tokenizer.inlineText
@@ -76,8 +67,8 @@ export async function markdownToBlocks(body: string, options: ParsingOptions = {
 			return undefined
 		}
 		const raw: string = cap[0]
-		const text = raw.replace(/[&<>]/g, (char: string) => replacements[char])
-		return { type: "text", raw, text }
+		// Return raw text without escaping (escaping happens downstream in parseMrkdwn)
+		return { type: "text", raw, text: raw }
 	}
 
 	const tokens = lexer.lex(body)

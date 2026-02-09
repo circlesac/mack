@@ -193,7 +193,7 @@ export function image(url: string, altText: string, title?: string): ImageBlock 
 	}
 }
 
-export function richTextList(items: RichTextElement[], style: "bullet" | "ordered" = "bullet", indent = 0): RichTextBlock {
+export function richTextList(items: RichTextElement[], style: "bullet" | "ordered" = "bullet", indent = 0, offset?: number): RichTextBlock {
 	return {
 		type: "rich_text",
 		elements: [
@@ -201,6 +201,7 @@ export function richTextList(items: RichTextElement[], style: "bullet" | "ordere
 				type: "rich_text_list",
 				style,
 				indent,
+				...(offset !== undefined && { offset }),
 				elements: items
 			}
 		]

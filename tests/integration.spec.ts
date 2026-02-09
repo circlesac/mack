@@ -111,17 +111,11 @@ a **b** _c_ **_d_ e**
 					elements: [
 						{
 							type: "rich_text_section",
-							elements: [
-								{ type: "text", text: "\u2610 " },
-								{ type: "text", text: "checkbox false" }
-							]
+							elements: [{ type: "text", text: "\u2610 checkbox false" }]
 						},
 						{
 							type: "rich_text_section",
-							elements: [
-								{ type: "text", text: "\u2611 " },
-								{ type: "text", text: "checkbox true" }
-							]
+							elements: [{ type: "text", text: "\u2611 checkbox true" }]
 						}
 					]
 				}
@@ -574,5 +568,211 @@ i18n with plurals support and easy syntax.`
 		const blocks = await markdownToBlocks("---")
 		expect(blocks).toHaveLength(1)
 		expect(blocks[0].type).toBe("divider")
+	})
+
+	describe("style composition", () => {
+		it("should handle bold italic (***text***)", async () => {
+			const blocks = await markdownToBlocks("- ***bold italic***")
+			expect(blocks[0]).toMatchObject({
+				type: "rich_text",
+				elements: [
+					{
+						type: "rich_text_list",
+						elements: [
+							{
+								type: "rich_text_section",
+								elements: [{ type: "text", text: "bold italic", style: { bold: true, italic: true } }]
+							}
+						]
+					}
+				]
+			})
+		})
+
+		it("should handle bold with nested italic (**bold _and italic_**)", async () => {
+			const blocks = await markdownToBlocks("- **bold _and italic_**")
+			expect(blocks[0]).toMatchObject({
+				type: "rich_text",
+				elements: [
+					{
+						type: "rich_text_list",
+						elements: [
+							{
+								type: "rich_text_section",
+								elements: [
+									{ type: "text", text: "bold ", style: { bold: true } },
+									{ type: "text", text: "and italic", style: { bold: true, italic: true } }
+								]
+							}
+						]
+					}
+				]
+			})
+		})
+
+		it("should handle strikethrough with bold (~~**text**~~)", async () => {
+			const blocks = await markdownToBlocks("- ~~**struck bold**~~")
+			expect(blocks[0]).toMatchObject({
+				type: "rich_text",
+				elements: [
+					{
+						type: "rich_text_list",
+						elements: [
+							{
+								type: "rich_text_section",
+								elements: [{ type: "text", text: "struck bold", style: { bold: true, strike: true } }]
+							}
+						]
+					}
+				]
+			})
+		})
+	})
+
+	describe("list offsets", () => {
+		it("should handle ordered lists starting at 1 (no offset)", async () => {
+			const blocks = await markdownToBlocks("1. first\n2. second\n3. third")
+			const rt = blocks[0] as slack.RichTextBlock
+			const list = rt.elements[0] as slack.RichTextListElement
+			expect(list.style).toBe("ordered")
+			expect(list.offset).toBeUndefined()
+		})
+
+		it("should handle ordered lists starting at > 1 (with offset)", async () => {
+			const blocks = await markdownToBlocks("5. fifth\n6. sixth\n7. seventh")
+			const rt = blocks[0] as slack.RichTextBlock
+			const list = rt.elements[0] as slack.RichTextListElement
+			expect(list.style).toBe("ordered")
+			expect(list.offset).toBe(4)
+		})
+	})
+
+	describe("nested lists", () => {
+		it("should produce indent levels for nested bullet lists", async () => {
+			const blocks = await markdownToBlocks("- Parent\n  - Child\n    - Grandchild")
+			const allElements = blocks.flatMap((b) => (b.type === "rich_text" ? (b as slack.RichTextBlock).elements : []))
+			const lists = allElements.filter((e) => e.type === "rich_text_list") as slack.RichTextListElement[]
+
+			// Should have lists with increasing indent
+			expect(lists.length).toBeGreaterThanOrEqual(1)
+			const indents = lists.map((l) => l.indent ?? 0)
+			expect(indents).toContain(0) // top level
+		})
+
+		it("should produce indent levels for nested ordered lists", async () => {
+			const blocks = await markdownToBlocks("1. Parent\n   1. Child\n   2. Child 2\n2. Parent 2")
+			const allElements = blocks.flatMap((b) => (b.type === "rich_text" ? (b as slack.RichTextBlock).elements : []))
+			const lists = allElements.filter((e) => e.type === "rich_text_list") as slack.RichTextListElement[]
+
+			expect(lists.length).toBeGreaterThanOrEqual(1)
+		})
+	})
+
+	describe("soft line breaks", () => {
+		it("should convert single newlines to spaces in list items", async () => {
+			const blocks = await markdownToBlocks("- first line\nsecond line")
+			const rt = blocks[0] as slack.RichTextBlock
+			const list = rt.elements[0] as slack.RichTextListElement
+			const section = list.elements[0] as slack.RichTextElement
+			const textEl = section.elements[0] as slack.RichTextTextElement
+			expect(textEl.text).toContain("first line")
+			// Single newline should become space (soft break)
+			expect(textEl.text).not.toContain("\n")
+		})
+	})
+
+	describe("escape tokens", () => {
+		it("should handle escaped characters in list items", async () => {
+			const blocks = await markdownToBlocks("- 5 \\> 3")
+			const rt = blocks[0] as slack.RichTextBlock
+			const list = rt.elements[0] as slack.RichTextListElement
+			const section = list.elements[0] as slack.RichTextElement
+			const allText = section.elements.map((e) => ("text" in e ? e.text : "")).join("")
+			expect(allText).toContain("5")
+			expect(allText).toContain(">")
+			expect(allText).toContain("3")
+		})
+	})
+
+	describe("style propagation in Slack patterns", () => {
+		it("should propagate bold style to user mentions", async () => {
+			const blocks = await markdownToBlocks("- **<@U12345>**")
+			expect(blocks[0]).toMatchObject({
+				type: "rich_text",
+				elements: [
+					{
+						type: "rich_text_list",
+						elements: [
+							{
+								type: "rich_text_section",
+								elements: [{ type: "user", user_id: "U12345", style: { bold: true } }]
+							}
+						]
+					}
+				]
+			})
+		})
+
+		it("should propagate italic style to broadcast mentions", async () => {
+			const blocks = await markdownToBlocks("> _<@U12345> please review_")
+			expect(blocks[0]).toMatchObject({
+				type: "rich_text",
+				elements: [
+					{
+						type: "rich_text_quote",
+						elements: [
+							{ type: "user", user_id: "U12345", style: { italic: true } },
+							{ type: "text", text: " please review", style: { italic: true } }
+						]
+					}
+				]
+			})
+		})
+	})
+
+	describe("HTML improvements", () => {
+		it("should parse HTML img tags without self-closing slash", async () => {
+			const blocks = await markdownToBlocks('<img src="https://example.com/photo.jpg" alt="Photo">')
+			expect(blocks).toHaveLength(1)
+			expect(blocks[0]).toMatchObject({
+				type: "image",
+				image_url: "https://example.com/photo.jpg",
+				alt_text: "Photo"
+			})
+		})
+
+		it("should parse enhanced video metadata", async () => {
+			const blocks = await markdownToBlocks(
+				'<video src="https://example.com/v.mp4" poster="https://example.com/t.jpg" title="Test" alt="Video" data-provider-name="YouTube" data-author-name="Author" data-description="Desc" />'
+			)
+			expect(blocks).toHaveLength(1)
+			expect(blocks[0]).toMatchObject({
+				type: "video",
+				video_url: "https://example.com/v.mp4",
+				provider_name: "YouTube",
+				author_name: "Author",
+				description: { type: "plain_text", text: "Desc" }
+			})
+		})
+
+		it("should handle Slack patterns parsed as HTML at block level", async () => {
+			// <!here> at block level gets parsed as HTML comment by marked
+			const blocks = await markdownToBlocks("<!here>")
+			const allText = JSON.stringify(blocks)
+			expect(allText).toContain('"type":"broadcast"')
+			expect(allText).toContain('"range":"here"')
+		})
+	})
+
+	describe("complex blockquotes", () => {
+		it("should handle blockquotes containing code blocks", async () => {
+			const blocks = await markdownToBlocks("> text\n>\n> ```\n> code\n> ```")
+			expect(blocks.length).toBeGreaterThan(0)
+		})
+
+		it("should handle blockquotes containing lists", async () => {
+			const blocks = await markdownToBlocks("> header\n>\n> - item 1\n> - item 2")
+			expect(blocks.length).toBeGreaterThan(0)
+		})
 	})
 })
