@@ -136,6 +136,41 @@ describe("parser", () => {
 
 		expect(actual).toStrictEqual([slack.richTextQuote([{ type: "text", text: "hello world" }])])
 	})
+
+	it("should parse emoji shortcodes in blockquotes as emoji elements", () => {
+		const tokens = marked.lexer("> :bulb: tip")
+		const actual = parseBlocks(tokens)
+
+		expect(actual).toStrictEqual([
+			slack.richTextQuote([
+				{ type: "emoji", name: "bulb" },
+				{ type: "text", text: " tip" },
+			])
+		])
+	})
+
+	it("should parse emoji shortcodes in table cells as rich_text", () => {
+		const tokens = marked.lexer("| A | B |\n| --- | --- |\n| :rocket: | 2 |")
+		const actual = parseBlocks(tokens)
+
+		expect(actual).toHaveLength(1)
+		const tableBlock = actual[0] as slack.TableBlock
+		expect(tableBlock.rows[0][0]).toMatchObject({ type: "raw_text", text: "A" })
+		expect(tableBlock.rows[1][0]).toMatchObject({
+			type: "rich_text",
+			elements: [{ type: "rich_text_section", elements: [{ type: "emoji", name: "rocket" }] }],
+		})
+		expect(tableBlock.rows[1][1]).toMatchObject({ type: "raw_text", text: "2" })
+	})
+
+	it("should keep emoji shortcodes in plain text as mrkdwn (section block)", () => {
+		const tokens = marked.lexer(":rocket: launch :bulb:")
+		const actual = parseBlocks(tokens)
+
+		// Plain paragraphs use mrkdwn sections where Slack natively resolves emoji shortcodes
+		expect(actual).toHaveLength(1)
+		expect(actual[0]).toMatchObject({ type: "section" })
+	})
 })
 
 it("should truncate basic markdown", () => {

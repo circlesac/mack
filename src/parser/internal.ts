@@ -170,72 +170,79 @@ function hasStyle(style?: RichTextStyle): boolean {
 }
 
 /**
- * Parses Slack special formatting patterns in text and returns rich text elements.
+ * Parses Slack special formatting patterns and emoji shortcodes in text and returns rich text elements.
  * Handles: <@USER_ID>, <#CHANNEL_ID>, <!here>, <!channel>, <!everyone>,
- * <!subteam^TEAM_ID>, <!date^timestamp^format|fallback>, <url|text>
+ * <!subteam^TEAM_ID>, <!date^timestamp^format|fallback>, <url|text>, :emoji_name:
  */
 function parseSlackSpecialFormatting(text: string, style?: RichTextStyle): RichTextSectionElement[] {
-	const slackPattern = /<(@[A-Z0-9]+(?:\|[^>]+)?|#[A-Z0-9]+(?:\|[^>]+)?|![a-z]+(?:\^[^>]+)*(?:\|[^>]+)?|https?:\/\/[^|>]+\|[^>]+|https?:\/\/[^>]+)>/g
+	// Combined pattern: Slack special formatting OR emoji shortcodes
+	const combinedPattern = /(<(?:@[A-Z0-9]+(?:\|[^>]+)?|#[A-Z0-9]+(?:\|[^>]+)?|![a-z]+(?:\^[^>]+)*(?:\|[^>]+)?|https?:\/\/[^|>]+\|[^>]+|https?:\/\/[^>]+)>)|:([a-z0-9_+-]+):/g
 
 	const elements: RichTextSectionElement[] = []
 	let lastIndex = 0
 	let match: RegExpExecArray | null
 
-	while ((match = slackPattern.exec(text)) !== null) {
+	while ((match = combinedPattern.exec(text)) !== null) {
 		if (match.index > lastIndex) {
 			const beforeText = text.slice(lastIndex, match.index)
 			elements.push({ type: "text", text: beforeText, ...(hasStyle(style) && { style }) })
 		}
 
-		const content = match[1]
+		if (match[2]) {
+			// Emoji shortcode match
+			elements.push({ type: "emoji", name: match[2], ...(hasStyle(style) && { style }) })
+		} else {
+			// Slack special formatting match
+			const content = match[1].slice(1, -1) // strip < >
 
-		if (content.startsWith("@")) {
-			const [userId] = content.slice(1).split("|")
-			elements.push({ type: "user", user_id: userId, ...(hasStyle(style) && { style }) })
-		} else if (content.startsWith("#")) {
-			const [channelId] = content.slice(1).split("|")
-			elements.push({ type: "channel", channel_id: channelId, ...(hasStyle(style) && { style }) })
-		} else if (content.startsWith("!")) {
-			if (content === "!here") {
-				elements.push({ type: "broadcast", range: "here", ...(hasStyle(style) && { style }) })
-			} else if (content === "!channel") {
-				elements.push({ type: "broadcast", range: "channel", ...(hasStyle(style) && { style }) })
-			} else if (content === "!everyone") {
-				elements.push({ type: "broadcast", range: "everyone", ...(hasStyle(style) && { style }) })
-			} else if (content.startsWith("!subteam^")) {
-				const usergroupId = content.slice(9)
-				elements.push({ type: "usergroup", usergroup_id: usergroupId, ...(hasStyle(style) && { style }) })
-			} else if (content.startsWith("!date^")) {
-				const dateContent = content.slice(6)
-				const parts = dateContent.split("|")
-				const formatParts = (parts[0] || "").split("^")
-				const timestamp = parseInt(formatParts[0] || "0", 10)
-				const format = formatParts.slice(1).join("^") || "{date_pretty}"
-				const fallback = parts[1]
-				elements.push({
-					type: "date",
-					timestamp,
-					format,
-					...(fallback && { fallback }),
-					...(hasStyle(style) && { style })
-				})
+			if (content.startsWith("@")) {
+				const [userId] = content.slice(1).split("|")
+				elements.push({ type: "user", user_id: userId, ...(hasStyle(style) && { style }) })
+			} else if (content.startsWith("#")) {
+				const [channelId] = content.slice(1).split("|")
+				elements.push({ type: "channel", channel_id: channelId, ...(hasStyle(style) && { style }) })
+			} else if (content.startsWith("!")) {
+				if (content === "!here") {
+					elements.push({ type: "broadcast", range: "here", ...(hasStyle(style) && { style }) })
+				} else if (content === "!channel") {
+					elements.push({ type: "broadcast", range: "channel", ...(hasStyle(style) && { style }) })
+				} else if (content === "!everyone") {
+					elements.push({ type: "broadcast", range: "everyone", ...(hasStyle(style) && { style }) })
+				} else if (content.startsWith("!subteam^")) {
+					const usergroupId = content.slice(9)
+					elements.push({ type: "usergroup", usergroup_id: usergroupId, ...(hasStyle(style) && { style }) })
+				} else if (content.startsWith("!date^")) {
+					const dateContent = content.slice(6)
+					const parts = dateContent.split("|")
+					const formatParts = (parts[0] || "").split("^")
+					const timestamp = parseInt(formatParts[0] || "0", 10)
+					const format = formatParts.slice(1).join("^") || "{date_pretty}"
+					const fallback = parts[1]
+					elements.push({
+						type: "date",
+						timestamp,
+						format,
+						...(fallback && { fallback }),
+						...(hasStyle(style) && { style })
+					})
+				} else {
+					elements.push({ type: "text", text: match[0], ...(hasStyle(style) && { style }) })
+				}
+			} else if (content.startsWith("http://") || content.startsWith("https://")) {
+				const pipeIndex = content.indexOf("|")
+				if (pipeIndex !== -1) {
+					elements.push({
+						type: "link",
+						url: content.slice(0, pipeIndex),
+						text: content.slice(pipeIndex + 1),
+						...(hasStyle(style) && { style })
+					})
+				} else {
+					elements.push({ type: "link", url: content, ...(hasStyle(style) && { style }) })
+				}
 			} else {
 				elements.push({ type: "text", text: match[0], ...(hasStyle(style) && { style }) })
 			}
-		} else if (content.startsWith("http://") || content.startsWith("https://")) {
-			const pipeIndex = content.indexOf("|")
-			if (pipeIndex !== -1) {
-				elements.push({
-					type: "link",
-					url: content.slice(0, pipeIndex),
-					text: content.slice(pipeIndex + 1),
-					...(hasStyle(style) && { style })
-				})
-			} else {
-				elements.push({ type: "link", url: content, ...(hasStyle(style) && { style }) })
-			}
-		} else {
-			elements.push({ type: "text", text: match[0], ...(hasStyle(style) && { style }) })
 		}
 
 		lastIndex = match.index + match[0].length
@@ -659,6 +666,16 @@ function parseTableCellToBlock(cell: marked.Tokens.TableCell): TableCell {
 				return ""
 			})
 			.join("")
+
+		// If text contains emoji shortcodes, use rich_text to render them properly
+		if (/:([a-z0-9_+-]+):/.test(text)) {
+			const elements = parseSlackSpecialFormatting(text)
+			return {
+				type: "rich_text",
+				elements: [{ type: "rich_text_section", elements }]
+			}
+		}
+
 		return { type: "raw_text", text }
 	}
 }
