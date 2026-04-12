@@ -71,10 +71,31 @@ export async function markdownToBlocks(body: string, options: ParsingOptions = {
 		return { type: "text", raw, text: raw }
 	}
 
+	// Override codespan to prevent marked's HTML entity escaping of code content.
+	// marked escapes ", ', &, <, > inside code spans which causes double-encoding
+	// when our mrkdwn escaping runs later (e.g. " → &quot; → &amp;quot;).
+	const origCodespan = tokenizer.codespan
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	tokenizer.codespan = function (this: any, src: string) {
+		const cap = this.rules.inline.code.exec(src)
+		if (!cap) {
+			return undefined
+		}
+		let text = cap[2].replace(/\n/g, " ")
+		const hasNonSpaceChars = /[^ ]/.test(text)
+		const hasSpaceCharsOnBothEnds = /^ /.test(text) && / $/.test(text)
+		if (hasNonSpaceChars && hasSpaceCharsOnBothEnds) {
+			text = text.substring(1, text.length - 1)
+		}
+		// Return raw text without HTML escaping
+		return { type: "codespan", raw: cap[0], text }
+	}
+
 	const tokens = lexer.lex(body)
 
-	// Restore the original inlineText to avoid polluting marked.defaults
+	// Restore overridden tokenizers to avoid polluting marked.defaults
 	tokenizer.inlineText = origInlineText
+	tokenizer.codespan = origCodespan
 
 	const blocks = parseBlocks(tokens, options)
 

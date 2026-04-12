@@ -192,6 +192,12 @@ if (a === 'hi') {
 		expect(actual).toStrictEqual(expected)
 	})
 
+	it("should preserve double quotes in code spans", async () => {
+		const actual = await markdownToBlocks('`flexhr users search "David Shin"`')
+		const expected = [slack.section('`flexhr users search "David Shin"`')]
+		expect(actual).toStrictEqual(expected)
+	})
+
 	describe("slack special formatting in rich text", () => {
 		it("should parse user mentions in blockquotes", async () => {
 			const actual = await markdownToBlocks("> hello <@U12345>")
