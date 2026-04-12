@@ -35,9 +35,9 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           oneup version
 
+      - run: git push origin master --follow-tags
+
       - uses: actions/setup-node@v4
         with:
           registry-url: "https://registry.npmjs.org"
       - run: npm publish --tag ${{ inputs.env == 'production' && 'latest' || inputs.env }}
-
-      - run: git push origin master --follow-tags
