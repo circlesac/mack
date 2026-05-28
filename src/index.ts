@@ -99,7 +99,38 @@ export async function markdownToBlocks(body: string, options: ParsingOptions = {
 
 	const blocks = parseBlocks(tokens, options)
 
+	addDividerSpacing(blocks)
+
 	validateBlockCount(blocks.length, MAX_BLOCKS)
 
 	return blocks
+}
+
+/**
+ * Adds breathing room above each divider by appending a trailing blank line to
+ * the immediately preceding block (in place, not as a separate spacer block).
+ *
+ * A list rendered directly before a divider otherwise sits flush against the
+ * rule. This mirrors the spacing of hand-built Block Kit messages, where each
+ * section's rich_text block ends with a trailing newline before the divider.
+ */
+function addDividerSpacing(blocks: (KnownBlock | TableBlock | RichTextBlock | VideoBlock)[]): void {
+	for (let i = 1; i < blocks.length; i++) {
+		if (blocks[i].type !== "divider") continue
+		const prev = blocks[i - 1]
+		if (prev.type === "rich_text") {
+			const rt = prev as RichTextBlock
+			const last = rt.elements[rt.elements.length - 1]
+			if (last && last.type === "rich_text_section") {
+				last.elements.push({ type: "text", text: "\n" })
+			} else {
+				rt.elements.push({ type: "rich_text_section", elements: [{ type: "text", text: "\n" }] })
+			}
+		} else if (prev.type === "section") {
+			const sec = prev as { text?: { text?: string } }
+			if (sec.text && typeof sec.text.text === "string" && !sec.text.text.endsWith("\n")) {
+				sec.text.text += "\n"
+			}
+		}
+	}
 }
