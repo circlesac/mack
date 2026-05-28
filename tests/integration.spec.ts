@@ -781,4 +781,36 @@ i18n with plurals support and easy syntax.`
 			expect(blocks.length).toBeGreaterThan(0)
 		})
 	})
+
+	describe("divider spacing", () => {
+		it("appends a trailing newline inside a list before a divider", async () => {
+			const blocks = await markdownToBlocks("- a\n- b\n\n---")
+			const rt = blocks[0] as slack.RichTextBlock
+			const last = rt.elements[rt.elements.length - 1] as slack.RichTextElement
+			expect(last.type).toBe("rich_text_section")
+			expect(last.elements.some((e) => e.type === "text" && e.text === "\n")).toBe(true)
+			expect(blocks[1].type).toBe("divider")
+		})
+
+		it("appends a trailing newline to a section before a divider", async () => {
+			const blocks = await markdownToBlocks("hello\n\n---")
+			const sec = blocks[0] as { text: { text: string } }
+			expect(sec.text.text.endsWith("\n")).toBe(true)
+			expect(blocks[1].type).toBe("divider")
+		})
+
+		it("inserts a spacer block before a divider after a table", async () => {
+			const blocks = await markdownToBlocks("| a | b |\n|---|---|\n| 1 | 2 |\n\n---")
+			const tableIdx = blocks.findIndex((b) => b.type === "table")
+			expect(tableIdx).toBeGreaterThanOrEqual(0)
+			expect(blocks[tableIdx + 1].type).toBe("rich_text")
+			expect(blocks[tableIdx + 2].type).toBe("divider")
+		})
+
+		it("leaves a lone divider unchanged", async () => {
+			const blocks = await markdownToBlocks("---")
+			expect(blocks).toHaveLength(1)
+			expect(blocks[0].type).toBe("divider")
+		})
+	})
 })

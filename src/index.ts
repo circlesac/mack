@@ -107,15 +107,18 @@ export async function markdownToBlocks(body: string, options: ParsingOptions = {
 }
 
 /**
- * Adds breathing room above each divider by appending a trailing blank line to
- * the immediately preceding block (in place, not as a separate spacer block).
+ * Adds breathing room above each divider. A block rendered directly before a
+ * divider otherwise sits flush against the rule.
  *
- * A list rendered directly before a divider otherwise sits flush against the
- * rule. This mirrors the spacing of hand-built Block Kit messages, where each
- * section's rich_text block ends with a trailing newline before the divider.
+ * Where possible the blank line is appended in place (a trailing newline inside
+ * the preceding rich_text or section block), mirroring hand-built Block Kit
+ * messages. Blocks that can't carry a trailing newline (table, image, video)
+ * instead get a minimal blank-line spacer block inserted before the divider.
  */
 function addDividerSpacing(blocks: (KnownBlock | TableBlock | RichTextBlock | VideoBlock)[]): void {
-	for (let i = 1; i < blocks.length; i++) {
+	// Iterate from the end so inserted spacer blocks don't shift indices we
+	// have yet to visit.
+	for (let i = blocks.length - 1; i >= 1; i--) {
 		if (blocks[i].type !== "divider") continue
 		const prev = blocks[i - 1]
 		if (prev.type === "rich_text") {
@@ -131,6 +134,11 @@ function addDividerSpacing(blocks: (KnownBlock | TableBlock | RichTextBlock | Vi
 			if (sec.text && typeof sec.text.text === "string" && !sec.text.text.endsWith("\n")) {
 				sec.text.text += "\n"
 			}
+		} else if (prev.type === "table" || prev.type === "image" || prev.type === "video") {
+			blocks.splice(i, 0, {
+				type: "rich_text",
+				elements: [{ type: "rich_text_section", elements: [{ type: "text", text: "\n" }] }]
+			} as RichTextBlock)
 		}
 	}
 }
