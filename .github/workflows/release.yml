@@ -30,14 +30,22 @@ jobs:
       - run: bun test
 
       - run: npm install -g @circlesac/oneup
-      - run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          oneup version
-
-      - run: git push origin master --follow-tags
+      # oneup writes the next CalVer into package.json and prints it. It does NOT
+      # commit or tag (versions don't live in git) — so capture the version here
+      # and create the tag ourselves after publishing.
+      - name: Compute next version
+        run: echo "VERSION=$(oneup version | tail -1)" >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@v4
         with:
           registry-url: "https://registry.npmjs.org"
       - run: npm publish --tag ${{ inputs.env == 'production' && 'latest' || inputs.env }}
+
+      # Tag the source commit with the published version (previously missing —
+      # `git push --follow-tags` was a no-op because no tag was ever created).
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v$VERSION"
+          git push origin "v$VERSION"

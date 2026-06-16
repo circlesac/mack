@@ -37,6 +37,5 @@
     "pretest": "bun run compile",
     "test": "vitest run"
   },
-  "types": "build/src/index.d.ts",
-  "version": "26.2.4"
+  "types": "build/src/index.d.ts"
 }
