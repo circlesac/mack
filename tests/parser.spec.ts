@@ -144,7 +144,7 @@ describe("parser", () => {
 		expect(actual).toStrictEqual([
 			slack.richTextQuote([
 				{ type: "emoji", name: "bulb" },
-				{ type: "text", text: " tip" },
+				{ type: "text", text: " tip" }
 			])
 		])
 	})
@@ -158,7 +158,7 @@ describe("parser", () => {
 		expect(tableBlock.rows[0][0]).toMatchObject({ type: "raw_text", text: "A" })
 		expect(tableBlock.rows[1][0]).toMatchObject({
 			type: "rich_text",
-			elements: [{ type: "rich_text_section", elements: [{ type: "emoji", name: "rocket" }] }],
+			elements: [{ type: "rich_text_section", elements: [{ type: "emoji", name: "rocket" }] }]
 		})
 		expect(tableBlock.rows[1][1]).toMatchObject({ type: "raw_text", text: "2" })
 	})

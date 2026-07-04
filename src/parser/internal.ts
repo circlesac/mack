@@ -1,6 +1,7 @@
 import { DividerBlock, HeaderBlock, ImageBlock, KnownBlock, SectionBlock } from "@slack/types"
 import { XMLParser } from "fast-xml-parser"
 import { marked } from "marked"
+import { escapeForSlackCode } from "../escape"
 import {
 	ColumnSetting,
 	divider,
@@ -104,7 +105,7 @@ function parseMrkdwn(element: Exclude<PhrasingToken, marked.Tokens.Image>): stri
 			}
 
 			case "codespan":
-				return `\`${escapeForMrkdwn(element.text)}\``
+				return `\`${escapeForSlackCode(element.text)}\``
 
 			case "strong": {
 				return `*${element.tokens.flatMap((child) => parseMrkdwn(child as Exclude<PhrasingToken, marked.Tokens.Image>)).join("")}*`
@@ -452,9 +453,6 @@ function parseRawSlackSpecial(raw: string, style?: RichTextStyle): RichTextSecti
 	}
 	return null
 }
-
-/** Inline token types that can appear in simple list items */
-const INLINE_TOKEN_TYPES = new Set(["paragraph", "text", "html"])
 
 /** Block-level token types that make a list item complex */
 const BLOCK_TOKEN_TYPES = new Set(["code", "list", "blockquote", "table"])

@@ -1,5 +1,6 @@
 import type { KnownBlock } from "@slack/types"
 import { marked } from "marked"
+import { escapeMarkdownCodeForSlackText } from "./escape"
 import { parseBlocks } from "./parser/internal"
 import type { RichTextBlock, TableBlock, VideoBlock } from "./slack"
 import type { ParsingOptions } from "./types"
@@ -30,6 +31,7 @@ export type {
 	VideoBlockOptions
 } from "./slack"
 export type { ListOptions, ParsingOptions } from "./types"
+export { escapeMarkdownCodeForSlackText }
 
 /**
  * Parses Markdown content into Slack BlockKit Blocks.
@@ -83,7 +85,7 @@ export async function markdownToBlocks(body: string, options: ParsingOptions = {
 		}
 		let text = cap[2].replace(/\n/g, " ")
 		const hasNonSpaceChars = /[^ ]/.test(text)
-		const hasSpaceCharsOnBothEnds = /^ /.test(text) && / $/.test(text)
+		const hasSpaceCharsOnBothEnds = text.startsWith(" ") && text.endsWith(" ")
 		if (hasNonSpaceChars && hasSpaceCharsOnBothEnds) {
 			text = text.substring(1, text.length - 1)
 		}
@@ -104,6 +106,19 @@ export async function markdownToBlocks(body: string, options: ParsingOptions = {
 	validateBlockCount(blocks.length, MAX_BLOCKS)
 
 	return blocks
+}
+
+/**
+ * Produces a Slack `chat.postMessage.text` fallback from Markdown.
+ *
+ * Slack also scans the top-level `text` fallback for mention tokens even when
+ * Block Kit is present. Markdown code spans/fences are literal text, so Slack
+ * control tokens inside code must be entity-escaped here while real mentions
+ * outside code remain intact.
+ */
+export function markdownToSlackText(body: string): string {
+	validateInput(body)
+	return escapeMarkdownCodeForSlackText(body)
 }
 
 /**

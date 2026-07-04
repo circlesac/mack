@@ -54,6 +54,11 @@ The `blocks` object now results in [this](https://app.slack.com/block-kit-builde
 - `text`: the content to parse
 - `options`: the options to use when parsing.
 
+`function markdownToSlackText(text: string): string`
+
+- Produces a Slack `chat.postMessage.text` fallback from Markdown.
+- Escapes Slack control tokens inside Markdown code spans/fences while preserving real mentions outside code.
+
 ### Parsing Options
 
 ```ts

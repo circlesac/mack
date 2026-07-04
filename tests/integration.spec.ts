@@ -1,6 +1,6 @@
 import { readFileSync } from "fs"
 import { join } from "path"
-import { markdownToBlocks } from "../src"
+import { markdownToBlocks, markdownToSlackText } from "../src"
 import * as slack from "../src/slack"
 
 const fixturesDir = join(__dirname, "fixtures")
@@ -196,6 +196,17 @@ if (a === 'hi') {
 		const actual = await markdownToBlocks('`flexhr users search "David Shin"`')
 		const expected = [slack.section('`flexhr users search "David Shin"`')]
 		expect(actual).toStrictEqual(expected)
+	})
+
+	it("should escape Slack mentions inside paragraph code spans", async () => {
+		const actual = await markdownToBlocks("literal `<@U12345>` but notify <@U67890>")
+		const expected = [slack.section("literal `&lt;@U12345&gt;` but notify <@U67890>")]
+		expect(actual).toStrictEqual(expected)
+	})
+
+	it("should escape Slack control tokens inside fallback code only", () => {
+		expect(markdownToSlackText("literal `<@U12345>` but notify <@U67890>")).toBe("literal `&lt;@U12345&gt;` but notify <@U67890>")
+		expect(markdownToSlackText("before\n```\n<!here>\n<@U12345>\n```\nafter")).toBe("before\n```\n&lt;!here&gt;\n&lt;@U12345&gt;\n```\nafter")
 	})
 
 	describe("slack special formatting in rich text", () => {
