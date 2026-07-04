@@ -1,4 +1,5 @@
 import type { DividerBlock, HeaderBlock, ImageBlock, SectionBlock } from "@slack/types"
+import { escapeForSlackCode } from "./escape"
 import { safeTruncate } from "./validation"
 
 // Table block types (not yet in @slack/types)
@@ -217,7 +218,7 @@ export function richTextCode(code: string): RichTextBlock {
 				elements: [
 					{
 						type: "text",
-						text: code
+						text: escapeForSlackCode(code)
 					}
 				]
 			}

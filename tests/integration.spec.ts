@@ -204,6 +204,22 @@ if (a === 'hi') {
 		expect(actual).toStrictEqual(expected)
 	})
 
+	it("should escape Slack control tokens inside rich text code blocks", async () => {
+		const actual = await markdownToBlocks("before\n```\n<@U12345>\n<!here>\n```\nafter <@U67890>")
+		expect(JSON.stringify(actual)).toContain("&lt;@U12345&gt;")
+		expect(JSON.stringify(actual)).toContain("&lt;!here&gt;")
+		expect(JSON.stringify(actual)).toContain("<@U67890>")
+		expect(JSON.stringify(actual)).not.toContain("<@U12345>")
+		expect(JSON.stringify(actual)).not.toContain("<!here>")
+	})
+
+	it("should escape Slack control tokens inside rich text inline code", async () => {
+		const actual = await markdownToBlocks("- literal `<@U12345>` but notify <@U67890>")
+		expect(JSON.stringify(actual)).toContain("&lt;@U12345&gt;")
+		expect(JSON.stringify(actual)).toContain("U67890")
+		expect(JSON.stringify(actual)).not.toContain("<@U12345>")
+	})
+
 	it("should escape Slack control tokens inside fallback code only", () => {
 		expect(markdownToSlackText("literal `<@U12345>` but notify <@U67890>")).toBe("literal `&lt;@U12345&gt;` but notify <@U67890>")
 		expect(markdownToSlackText("before\n```\n<!here>\n<@U12345>\n```\nafter")).toBe("before\n```\n&lt;!here&gt;\n&lt;@U12345&gt;\n```\nafter")

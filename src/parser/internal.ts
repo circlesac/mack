@@ -271,7 +271,7 @@ function createTextElement(token: marked.Tokens.Text | marked.Tokens.Codespan, s
 
 	// Code spans: don't parse Slack formatting (keep as literal text)
 	if (token.type === "codespan") {
-		return [{ type: "text", text, ...(hasStyle(style) && { style }) }]
+		return [{ type: "text", text: escapeForSlackCode(text), ...(hasStyle(style) && { style }) }]
 	}
 
 	return parseSlackSpecialFormatting(text, style)
@@ -599,7 +599,7 @@ function parseList(element: marked.Tokens.List, options: ListOptions = {}, inden
 				const code = token as marked.Tokens.Code
 				remainingElements.push({
 					type: "rich_text_preformatted",
-					elements: [{ type: "text", text: code.text }]
+					elements: [{ type: "text", text: escapeForSlackCode(code.text) }]
 				})
 			} else if (token.type === "blockquote") {
 				const bqToken = token as marked.Tokens.Blockquote
