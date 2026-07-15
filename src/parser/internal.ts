@@ -62,7 +62,9 @@ function parsePlainText(element: PhrasingToken): string[] {
 			return element.tokens.flatMap((child) => parsePlainText(child as PhrasingToken))
 
 		case "br":
-			return []
+			// Hard line break (two trailing spaces / backslash + newline) → a real
+			// line break. Dropping it silently joins the surrounding text.
+			return ["\n"]
 
 		case "image":
 			return [element.title ?? element.href]
@@ -117,6 +119,12 @@ function parseMrkdwn(element: Exclude<PhrasingToken, marked.Tokens.Image>): stri
 			case "del": {
 				return `~${element.tokens.flatMap((child) => parseMrkdwn(child as Exclude<PhrasingToken, marked.Tokens.Image>)).join("")}~`
 			}
+
+			case "br":
+				// Hard line break → newline. Without this it falls through to the
+				// default and returns "", silently joining the surrounding text
+				// (e.g. "First.  \nSecond." rendered as "First.Second.").
+				return "\n"
 
 			default:
 				return ""
