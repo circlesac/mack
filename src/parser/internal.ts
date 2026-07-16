@@ -23,7 +23,7 @@ import {
 	video
 } from "../slack"
 import { ListOptions, ParsingOptions } from "../types"
-import { SECURE_XML_CONFIG, validateRecursionDepth, validateUrl } from "../validation"
+import { SECURE_XML_CONFIG, validateUrl } from "../validation"
 
 type PhrasingToken =
 	| marked.Tokens.Link
@@ -36,22 +36,6 @@ type PhrasingToken =
 	| marked.Tokens.Text
 	| marked.Tokens.HTML
 	| marked.Tokens.Escape
-
-let recursionDepth = 0
-
-/**
- * Escapes &, <, > for Slack mrkdwn format while preserving Slack special
- * patterns: <@U…>, <#C…>, <!here>, <!channel>, <!everyone>, <https://…>.
- * Only used in the section/mrkdwn code path (not rich_text).
- */
-const SLACK_MRKDWN_PATTERN = /(<(?:@[A-Z0-9]+(?:\|[^>]+)?|#[A-Z0-9]+(?:\|[^>]+)?|![a-z]+(?:\^[^>]+)*(?:\|[^>]+)?|https?:\/\/[^>]+)>)/g
-
-function escapeForMrkdwn(text: string): string {
-	return text
-		.split(SLACK_MRKDWN_PATTERN)
-		.map((part, i) => (i % 2 === 1 ? part : part.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")))
-		.join("")
-}
 
 function parsePlainText(element: PhrasingToken): string[] {
 	switch (element.type) {
@@ -76,92 +60,40 @@ function parsePlainText(element: PhrasingToken): string[] {
 	}
 }
 
-function isSectionBlock(block: KnownBlock): block is SectionBlock {
-	return block.type === "section"
-}
+/**
+ * Renders a paragraph as a rich_text block (images split into their own
+ * image blocks, as before).
+ *
+ * rich_text carries bold/italic/strike structurally instead of via mrkdwn
+ * delimiters, so emphasis renders even when it directly touches a word
+ * character — Slack's mrkdwn parser refuses `_수정_이고` / `*수정*을` (any
+ * marker adjacent to a letter, which Korean particles hit constantly), and
+ * mrkdwn has no escape mechanism to work around it.
+ */
+function parseParagraph(element: marked.Tokens.Paragraph): (RichTextBlock | ImageBlock)[] {
+	const blocks: (RichTextBlock | ImageBlock)[] = []
+	let pending: RichTextSectionElement[] = []
 
-function parseMrkdwn(element: Exclude<PhrasingToken, marked.Tokens.Image>): string {
-	recursionDepth++
-	try {
-		validateRecursionDepth(recursionDepth)
-
-		switch (element.type) {
-			case "link": {
-				const href = element.href || ""
-				// Handle Slack pipe format: <url|text> parsed as autolink by marked
-				const pipeIndex = href.indexOf("|")
-				if (pipeIndex > 0) {
-					const url = href.slice(0, pipeIndex)
-					if (validateUrl(url)) {
-						return `<${url}|${href.slice(pipeIndex + 1)}>`
-					}
-				}
-				if (!validateUrl(href)) {
-					return element.tokens.flatMap((child) => parseMrkdwn(child as Exclude<PhrasingToken, marked.Tokens.Image>)).join("")
-				}
-				return `<${href}|${element.tokens.flatMap((child) => parseMrkdwn(child as Exclude<PhrasingToken, marked.Tokens.Image>)).join("")}> `
-			}
-
-			case "em": {
-				return `_${element.tokens.flatMap((child) => parseMrkdwn(child as Exclude<PhrasingToken, marked.Tokens.Image>)).join("")}_`
-			}
-
-			case "codespan":
-				return `\`${escapeForSlackCode(element.text)}\``
-
-			case "strong": {
-				return `*${element.tokens.flatMap((child) => parseMrkdwn(child as Exclude<PhrasingToken, marked.Tokens.Image>)).join("")}*`
-			}
-
-			case "text":
-				return escapeForMrkdwn(element.text)
-
-			case "del": {
-				return `~${element.tokens.flatMap((child) => parseMrkdwn(child as Exclude<PhrasingToken, marked.Tokens.Image>)).join("")}~`
-			}
-
-			case "br":
-				// Hard line break → newline. Without this it falls through to the
-				// default and returns "", silently joining the surrounding text
-				// (e.g. "First.  \nSecond." rendered as "First.Second.").
-				return "\n"
-
-			default:
-				return ""
+	const flush = () => {
+		if (pending.length > 0) {
+			blocks.push({ type: "rich_text", elements: [{ type: "rich_text_section", elements: pending }] })
+			pending = []
 		}
-	} finally {
-		recursionDepth--
 	}
-}
 
-function addMrkdwn(content: string, accumulator: (SectionBlock | ImageBlock)[]) {
-	const last = accumulator[accumulator.length - 1]
-
-	if (last && isSectionBlock(last) && last.text) {
-		last.text.text += content
-	} else {
-		accumulator.push(section(content))
+	for (const child of element.tokens as PhrasingToken[]) {
+		if (child.type === "image") {
+			flush()
+			blocks.push(image(child.href, child.text || child.title || child.href, child.title))
+		} else {
+			// Preserve soft line breaks: chat prose treats a typed newline as a
+			// line break, unlike list items where soft-wrapped text joins.
+			pending.push(...processTokensWithStyle([child], undefined, true))
+		}
 	}
-}
+	flush()
 
-function parsePhrasingContent(element: PhrasingToken, accumulator: (SectionBlock | ImageBlock)[]) {
-	if (element.type === "image") {
-		const imageBlock: ImageBlock = image(element.href, element.text || element.title || element.href, element.title)
-		accumulator.push(imageBlock)
-	} else {
-		const text = parseMrkdwn(element)
-		addMrkdwn(text, accumulator)
-	}
-}
-
-function parseParagraph(element: marked.Tokens.Paragraph): KnownBlock[] {
-	return element.tokens.reduce(
-		(accumulator, child) => {
-			parsePhrasingContent(child as PhrasingToken, accumulator)
-			return accumulator
-		},
-		[] as (SectionBlock | ImageBlock)[]
-	)
+	return blocks
 }
 
 function parseHeading(element: marked.Tokens.Heading): HeaderBlock {
@@ -271,11 +203,12 @@ function parseSlackSpecialFormatting(text: string, style?: RichTextStyle): RichT
 
 /**
  * Creates a text element with Slack special formatting parsing.
- * Applies soft line break conversion (single \n → space).
+ * Applies soft line break conversion (single \n → space) unless
+ * `preserveSoftBreaks` is set (paragraph prose keeps typed newlines).
  */
-function createTextElement(token: marked.Tokens.Text | marked.Tokens.Codespan, style?: RichTextStyle): RichTextSectionElement[] {
+function createTextElement(token: marked.Tokens.Text | marked.Tokens.Codespan, style?: RichTextStyle, preserveSoftBreaks = false): RichTextSectionElement[] {
 	// Soft line breaks: convert single newlines to spaces (standard markdown behavior)
-	const text = token.text.replace(/\n(?!\n)/g, " ")
+	const text = preserveSoftBreaks ? token.text : token.text.replace(/\n(?!\n)/g, " ")
 
 	// Code spans: don't parse Slack formatting (keep as literal text)
 	if (token.type === "codespan") {
@@ -363,16 +296,16 @@ function createLinkElements(token: marked.Tokens.Link, childTokens: PhrasingToke
  * Recursively converts a single inline token to RichTextSectionElements,
  * accumulating style state through nesting.
  */
-function tokenToRichTextElements(token: PhrasingToken, style?: RichTextStyle): RichTextSectionElement[] {
+function tokenToRichTextElements(token: PhrasingToken, style?: RichTextStyle, preserveSoftBreaks = false): RichTextSectionElement[] {
 	const hasTokens = "tokens" in token && token.tokens && token.tokens.length > 0
 
 	// Leaf nodes: no nested tokens
 	if (!hasTokens) {
 		switch (token.type) {
 			case "text":
-				return createTextElement(token, style)
+				return createTextElement(token, style, preserveSoftBreaks)
 			case "codespan":
-				return createTextElement(token, { ...style, code: true })
+				return createTextElement(token, { ...style, code: true }, preserveSoftBreaks)
 			case "br":
 				return [{ type: "text", text: "\n", ...(hasStyle(style) && { style }) }]
 			case "escape": {
@@ -406,24 +339,24 @@ function tokenToRichTextElements(token: PhrasingToken, style?: RichTextStyle): R
 	const childTokens = (token as { tokens: PhrasingToken[] }).tokens
 	switch (token.type) {
 		case "text":
-			return processTokensWithStyle(childTokens, style)
+			return processTokensWithStyle(childTokens, style, preserveSoftBreaks)
 		case "strong":
-			return processTokensWithStyle(childTokens, { ...style, bold: true })
+			return processTokensWithStyle(childTokens, { ...style, bold: true }, preserveSoftBreaks)
 		case "em":
-			return processTokensWithStyle(childTokens, { ...style, italic: true })
+			return processTokensWithStyle(childTokens, { ...style, italic: true }, preserveSoftBreaks)
 		case "del":
-			return processTokensWithStyle(childTokens, { ...style, strike: true })
+			return processTokensWithStyle(childTokens, { ...style, strike: true }, preserveSoftBreaks)
 		case "link":
 			return createLinkElements(token as marked.Tokens.Link, childTokens, style)
 		default:
-			return processTokensWithStyle(childTokens, style)
+			return processTokensWithStyle(childTokens, style, preserveSoftBreaks)
 	}
 }
 
-function processTokensWithStyle(tokens: PhrasingToken[], style?: RichTextStyle): RichTextSectionElement[] {
+function processTokensWithStyle(tokens: PhrasingToken[], style?: RichTextStyle, preserveSoftBreaks = false): RichTextSectionElement[] {
 	const elements: RichTextSectionElement[] = []
 	for (const token of tokens) {
-		elements.push(...tokenToRichTextElements(token, style))
+		elements.push(...tokenToRichTextElements(token, style, preserveSoftBreaks))
 	}
 	return elements
 }
@@ -787,7 +720,7 @@ function parseBlockquote(element: marked.Tokens.Blockquote): (KnownBlock | Table
 			const plainText = richBlock.elements
 				.map((el) => {
 					if (el.type === "rich_text_section") {
-						return el.elements.map((e) => (e.type === "text" ? e.text : "")).join("")
+						return el.elements.map(richElementToMrkdwn).join("")
 					}
 					return ""
 				})
@@ -798,6 +731,30 @@ function parseBlockquote(element: marked.Tokens.Blockquote): (KnownBlock | Table
 		}
 		return block
 	})
+}
+
+/** Serializes a rich_text element back to section-compatible mrkdwn text —
+ * used only by the complex-blockquote fallback, which flattens rich_text
+ * paragraphs into `> `-prefixed sections. */
+function richElementToMrkdwn(e: RichTextSectionElement): string {
+	switch (e.type) {
+		case "text":
+			return e.text ?? ""
+		case "link":
+			return e.text ? `<${e.url}|${e.text}>` : `<${e.url}>`
+		case "user":
+			return `<@${e.user_id}>`
+		case "usergroup":
+			return `<!subteam^${e.usergroup_id}>`
+		case "channel":
+			return `<#${e.channel_id}>`
+		case "emoji":
+			return `:${e.name}:`
+		case "broadcast":
+			return `<!${e.range}>`
+		default:
+			return ""
+	}
 }
 
 function parseThematicBreak(): DividerBlock {

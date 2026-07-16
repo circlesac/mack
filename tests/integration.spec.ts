@@ -42,8 +42,24 @@ a **b** _c_ **_d_ e**
 
 		const actual = await markdownToBlocks(text)
 
-		// Paragraph
-		expect(actual[0]).toStrictEqual(slack.section("a *b* _c_ *_d_ e*"))
+		// Paragraph → rich_text with structural styles
+		expect(actual[0]).toStrictEqual({
+			type: "rich_text",
+			elements: [
+				{
+					type: "rich_text_section",
+					elements: [
+						{ type: "text", text: "a " },
+						{ type: "text", text: "b", style: { bold: true } },
+						{ type: "text", text: " " },
+						{ type: "text", text: "c", style: { italic: true } },
+						{ type: "text", text: " " },
+						{ type: "text", text: "d", style: { bold: true, italic: true } },
+						{ type: "text", text: " e", style: { bold: true } }
+					]
+				}
+			]
+		})
 
 		// Heading
 		expect(actual[1]).toStrictEqual(slack.header("heading a"))
@@ -66,7 +82,10 @@ a **b** _c_ **_d_ e**
 		})
 
 		// Link
-		expect(actual[5]).toStrictEqual(slack.section("<https://apple.com|link> "))
+		expect(actual[5]).toStrictEqual({
+			type: "rich_text",
+			elements: [{ type: "rich_text_section", elements: [{ type: "link", url: "https://apple.com", text: "link" }] }]
+		})
 
 		// Bullet list -> rich_text_list
 		expect(actual[6]).toMatchObject({
@@ -147,7 +166,9 @@ a **b** _c_ **_d_ e**
 
 		const actual = await markdownToBlocks(text)
 
-		const expected = [slack.section(text.slice(0, 3000))]
+		// rich_text has no 3000-char section limit — long paragraphs are no
+		// longer silently truncated.
+		const expected = [{ type: "rich_text", elements: [{ type: "rich_text_section", elements: [{ type: "text", text }] }] }]
 
 		expect(actual).toStrictEqual(expected)
 	})
@@ -186,21 +207,43 @@ if (a === 'hi') {
 		})
 	})
 
-	it("should correctly escape text", async () => {
+	it("should keep raw text unescaped in paragraphs", async () => {
+		// rich_text text elements are structural — Slack never mrkdwn-parses
+		// them, so &, <, > stay literal.
 		const actual = await markdownToBlocks("<>&'\"\"'&><")
-		const expected = [slack.section("&lt;&gt;&amp;'\"\"'&amp;&gt;&lt;")]
+		const expected = [{ type: "rich_text", elements: [{ type: "rich_text_section", elements: [{ type: "text", text: "<>&'\"\"'&><" }] }] }]
 		expect(actual).toStrictEqual(expected)
 	})
 
 	it("should preserve double quotes in code spans", async () => {
 		const actual = await markdownToBlocks('`flexhr users search "David Shin"`')
-		const expected = [slack.section('`flexhr users search "David Shin"`')]
+		const expected = [
+			{
+				type: "rich_text",
+				elements: [{ type: "rich_text_section", elements: [{ type: "text", text: 'flexhr users search "David Shin"', style: { code: true } }] }]
+			}
+		]
 		expect(actual).toStrictEqual(expected)
 	})
 
 	it("should escape Slack mentions inside paragraph code spans", async () => {
 		const actual = await markdownToBlocks("literal `<@U12345>` but notify <@U67890>")
-		const expected = [slack.section("literal `&lt;@U12345&gt;` but notify <@U67890>")]
+		const expected = [
+			{
+				type: "rich_text",
+				elements: [
+					{
+						type: "rich_text_section",
+						elements: [
+							{ type: "text", text: "literal " },
+							{ type: "text", text: "&lt;@U12345&gt;", style: { code: true } },
+							{ type: "text", text: " but notify " },
+							{ type: "user", user_id: "U67890" }
+						]
+					}
+				]
+			}
+		]
 		expect(actual).toStrictEqual(expected)
 	})
 
@@ -208,9 +251,57 @@ if (a === 'hi') {
 		const actual = await markdownToBlocks("before\n```\n<@U12345>\n<!here>\n```\nafter <@U67890>")
 		expect(JSON.stringify(actual)).toContain("&lt;@U12345&gt;")
 		expect(JSON.stringify(actual)).toContain("&lt;!here&gt;")
-		expect(JSON.stringify(actual)).toContain("<@U67890>")
+		// The mention outside code becomes a structural user element
+		expect(JSON.stringify(actual)).toContain('"user_id":"U67890"')
 		expect(JSON.stringify(actual)).not.toContain("<@U12345>")
 		expect(JSON.stringify(actual)).not.toContain("<!here>")
+	})
+
+	describe("paragraph rich_text rendering", () => {
+		it("should render emphasis structurally even when adjacent to CJK particles", async () => {
+			// Slack mrkdwn refuses `_수정_이고` (marker touching a word char), so
+			// paragraphs must carry styles structurally.
+			const actual = await markdownToBlocks("오늘 조치는 *응급 수정*이고 근본 해결은 아닙니다.")
+			expect(actual).toStrictEqual([
+				{
+					type: "rich_text",
+					elements: [
+						{
+							type: "rich_text_section",
+							elements: [
+								{ type: "text", text: "오늘 조치는 " },
+								{ type: "text", text: "응급 수정", style: { italic: true } },
+								{ type: "text", text: "이고 근본 해결은 아닙니다." }
+							]
+						}
+					]
+				}
+			])
+		})
+
+		it("should preserve soft line breaks in paragraphs", async () => {
+			const actual = await markdownToBlocks("첫 문장.\n둘째 문장.")
+			expect(actual).toStrictEqual([{ type: "rich_text", elements: [{ type: "rich_text_section", elements: [{ type: "text", text: "첫 문장.\n둘째 문장." }] }] }])
+		})
+
+		it("should render hard line breaks as newlines in paragraphs", async () => {
+			const actual = await markdownToBlocks("첫 문장.  \n둘째 문장.")
+			expect(actual).toStrictEqual([
+				{
+					type: "rich_text",
+					elements: [
+						{
+							type: "rich_text_section",
+							elements: [
+								{ type: "text", text: "첫 문장." },
+								{ type: "text", text: "\n" },
+								{ type: "text", text: "둘째 문장." }
+							]
+						}
+					]
+				}
+			])
+		})
 	})
 
 	it("should escape Slack control tokens inside rich text inline code", async () => {
@@ -359,9 +450,9 @@ if (a === 'hi') {
 			// Should have headings and paragraphs interleaved
 			expect(blocks.length).toBeGreaterThanOrEqual(6)
 
-			// Paragraphs should be section blocks
-			const sectionBlocks = blocks.filter((b) => b.type === "section")
-			expect(sectionBlocks.length).toBeGreaterThanOrEqual(3)
+			// Paragraphs render as rich_text blocks
+			const paragraphBlocks = blocks.filter((b) => b.type === "rich_text")
+			expect(paragraphBlocks.length).toBeGreaterThanOrEqual(3)
 		})
 	})
 
@@ -521,9 +612,9 @@ i18n with plurals support and easy syntax.`
 		it("should parse user mentions in paragraphs", async () => {
 			const blocks = await markdownToBlocks("Hello <@U12345> how are you?")
 			const allText = JSON.stringify(blocks)
-			expect(allText).toContain('"type":"section"')
-			// User mentions in section blocks are preserved as Slack mrkdwn syntax
-			expect(allText).toContain("<@U12345>")
+			// User mentions in paragraphs become structural user elements
+			expect(allText).toContain('"type":"user"')
+			expect(allText).toContain('"user_id":"U12345"')
 		})
 
 		it("should parse slack formatting in list items", async () => {
@@ -819,10 +910,13 @@ i18n with plurals support and easy syntax.`
 			expect(blocks[1].type).toBe("divider")
 		})
 
-		it("appends a trailing newline to a section before a divider", async () => {
+		it("appends a trailing newline to a paragraph before a divider", async () => {
 			const blocks = await markdownToBlocks("hello\n\n---")
-			const sec = blocks[0] as { text: { text: string } }
-			expect(sec.text.text.endsWith("\n")).toBe(true)
+			const rt = blocks[0] as { type: string; elements: slack.RichTextElement[] }
+			expect(rt.type).toBe("rich_text")
+			const last = rt.elements[rt.elements.length - 1] as slack.RichTextElement
+			expect(last.type).toBe("rich_text_section")
+			expect(last.elements.some((e) => e.type === "text" && e.text === "\n")).toBe(true)
 			expect(blocks[1].type).toBe("divider")
 		})
 

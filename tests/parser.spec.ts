@@ -7,7 +7,24 @@ describe("parser", () => {
 		const tokens = marked.lexer("**a ~b~** c[*d*](https://example.com)")
 		const actual = parseBlocks(tokens)
 
-		const expected = [slack.section("*a ~b~* c<https://example.com|_d_> ")]
+		// Paragraphs render as rich_text: styles are structural, so emphasis
+		// works even when a marker touches a word character (CJK particles).
+		const expected = [
+			{
+				type: "rich_text",
+				elements: [
+					{
+						type: "rich_text_section",
+						elements: [
+							{ type: "text", text: "a ", style: { bold: true } },
+							{ type: "text", text: "b", style: { bold: true, strike: true } },
+							{ type: "text", text: " c" },
+							{ type: "link", url: "https://example.com", text: "d", style: { italic: true } }
+						]
+					}
+				]
+			}
+		]
 
 		expect(actual).toStrictEqual(expected)
 	})
@@ -163,13 +180,24 @@ describe("parser", () => {
 		expect(tableBlock.rows[1][1]).toMatchObject({ type: "raw_text", text: "2" })
 	})
 
-	it("should keep emoji shortcodes in plain text as mrkdwn (section block)", () => {
+	it("should parse emoji shortcodes in paragraphs as emoji elements", () => {
 		const tokens = marked.lexer(":rocket: launch :bulb:")
 		const actual = parseBlocks(tokens)
 
-		// Plain paragraphs use mrkdwn sections where Slack natively resolves emoji shortcodes
 		expect(actual).toHaveLength(1)
-		expect(actual[0]).toMatchObject({ type: "section" })
+		expect(actual[0]).toMatchObject({
+			type: "rich_text",
+			elements: [
+				{
+					type: "rich_text_section",
+					elements: [
+						{ type: "emoji", name: "rocket" },
+						{ type: "text", text: " launch " },
+						{ type: "emoji", name: "bulb" }
+					]
+				}
+			]
+		})
 	})
 })
 

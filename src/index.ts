@@ -56,9 +56,9 @@ export async function markdownToBlocks(body: string, options: ParsingOptions = {
 
 	// Override inlineText to prevent marked's default HTML entity escaping.
 	// We want raw text so that:
-	// 1. Rich text elements (lists, blockquotes, tables) contain unescaped text
+	// 1. Rich text elements (paragraphs, lists, blockquotes, tables) contain unescaped text
+	//    (rich_text is structural — Slack never parses &, <, > inside its text elements)
 	// 2. Slack special formatting (<@USER>, <!here>, etc.) can be matched with simple regex
-	// 3. Only the mrkdwn code path escapes &, <, > (via escapeForMrkdwn)
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const tokenizer = (lexer as any).tokenizer
 	const origInlineText = tokenizer.inlineText
@@ -69,7 +69,7 @@ export async function markdownToBlocks(body: string, options: ParsingOptions = {
 			return undefined
 		}
 		const raw: string = cap[0]
-		// Return raw text without escaping (escaping happens downstream in parseMrkdwn)
+		// Return raw text without escaping (rich_text text elements are never mrkdwn-parsed)
 		return { type: "text", raw, text: raw }
 	}
 
