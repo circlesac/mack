@@ -147,6 +147,20 @@ describe("parser", () => {
 		expect(tableBlock.rows[1][0]).toMatchObject({ type: "raw_text", text: "1" })
 	})
 
+	it("should emit a space for empty table cells (Slack rejects empty raw_text)", () => {
+		const tokens = marked.lexer("| A | B |\n| --- | --- |\n| 1 |  |\n|  | 2 |")
+		const actual = parseBlocks(tokens)
+		const tableBlock = actual[0] as slack.TableBlock
+		// every raw_text cell must be non-empty or Slack invalidates the whole table
+		for (const row of tableBlock.rows) {
+			for (const cell of row) {
+				if (cell.type === "raw_text") expect((cell.text ?? "").length).toBeGreaterThan(0)
+			}
+		}
+		expect(tableBlock.rows[1][1]).toMatchObject({ type: "raw_text", text: " " })
+		expect(tableBlock.rows[2][0]).toMatchObject({ type: "raw_text", text: " " })
+	})
+
 	it("should parse blockquotes as rich_text_quote", () => {
 		const tokens = marked.lexer("> hello world")
 		const actual = parseBlocks(tokens)
