@@ -615,7 +615,11 @@ function parseTableCellToBlock(cell: marked.Tokens.TableCell): TableCell {
 			}
 		}
 
-		return { type: "raw_text", text }
+		// Slack rejects a `raw_text` cell with empty text ("must be more than 0
+		// characters"), which invalidates the whole table block — so an empty cell
+		// (common in scaffold/template tables) would break rendering. Emit a single
+		// space, which Slack accepts and renders as a blank cell.
+		return { type: "raw_text", text: text || " " }
 	}
 }
 
