@@ -5,6 +5,7 @@ import { escapeForSlackCode } from "../escape"
 import {
 	ColumnSetting,
 	divider,
+	HeaderLevel,
 	header,
 	image,
 	RichTextBlock,
@@ -97,7 +98,8 @@ function parseParagraph(element: marked.Tokens.Paragraph): (RichTextBlock | Imag
 }
 
 function parseHeading(element: marked.Tokens.Heading): HeaderBlock {
-	return header(element.tokens.flatMap((child) => parsePlainText(child as PhrasingToken)).join(""))
+	const level = Math.min(element.depth, 4) as HeaderLevel
+	return header(element.tokens.flatMap((child) => parsePlainText(child as PhrasingToken)).join(""), level)
 }
 
 function parseCode(element: marked.Tokens.Code): RichTextBlock {

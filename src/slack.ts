@@ -2,6 +2,9 @@ import type { DividerBlock, HeaderBlock, ImageBlock, SectionBlock } from "@slack
 import { escapeForSlackCode } from "./escape"
 import { safeTruncate } from "./validation"
 
+export type HeaderLevel = 1 | 2 | 3 | 4
+export type LeveledHeaderBlock = HeaderBlock & { level?: HeaderLevel }
+
 // Table block types (not yet in @slack/types)
 export interface TableBlock {
 	type: "table"
@@ -170,13 +173,14 @@ export function divider(): DividerBlock {
 	}
 }
 
-export function header(text: string): HeaderBlock {
+export function header(text: string, level?: HeaderLevel): LeveledHeaderBlock {
 	return {
 		type: "header",
 		text: {
 			type: "plain_text",
 			text: safeTruncate(text, MAX_HEADER_LENGTH)
-		}
+		},
+		...(level === undefined ? {} : { level })
 	}
 }
 

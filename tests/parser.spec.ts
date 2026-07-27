@@ -33,7 +33,16 @@ describe("parser", () => {
 		const tokens = marked.lexer("# a")
 		const actual = parseBlocks(tokens)
 
-		const expected = [slack.header("a")]
+		const expected = [slack.header("a", 1)]
+
+		expect(actual).toStrictEqual(expected)
+	})
+
+	it("should preserve supported heading levels and clamp deeper headings", () => {
+		const tokens = marked.lexer(["# h1", "## h2", "### h3", "#### h4", "##### h5", "###### h6"].join("\n\n"))
+		const actual = parseBlocks(tokens)
+
+		const expected = [slack.header("h1", 1), slack.header("h2", 2), slack.header("h3", 3), slack.header("h4", 4), slack.header("h5", 4), slack.header("h6", 4)]
 
 		expect(actual).toStrictEqual(expected)
 	})
