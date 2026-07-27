@@ -937,4 +937,39 @@ i18n with plurals support and easy syntax.`
 			expect(blocks[0].type).toBe("divider")
 		})
 	})
+
+	describe("strikethrough requires double tilde (single ~ is literal)", () => {
+		function strikeTexts(blocks: unknown): string[] {
+			const out: string[] = []
+			const walk = (node: unknown): void => {
+				if (Array.isArray(node)) {
+					node.forEach(walk)
+					return
+				}
+				if (node && typeof node === "object") {
+					const n = node as Record<string, unknown>
+					const style = n.style as Record<string, unknown> | undefined
+					if (n.type === "text" && style?.strike) out.push(String(n.text))
+					for (const k of Object.keys(n)) walk(n[k])
+				}
+			}
+			walk(blocks)
+			return out
+		}
+
+		it("does not strike single-tilde numeric ranges (two ranges on one line)", async () => {
+			const blocks = await markdownToBlocks("- 3~4주차: 40~50분으로 늘리기")
+			expect(strikeTexts(blocks)).toEqual([])
+		})
+
+		it("does not strike single-tilde ranges across a whole message", async () => {
+			const blocks = await markdownToBlocks(["- **존2 25~35분**", "- 최대심박의 60~70%", "- 1~2주차: 존2 30분", "- 3~4주차: 40~50분"].join("\n"))
+			expect(strikeTexts(blocks)).toEqual([])
+		})
+
+		it("still strikes real ~~double tilde~~ strikethrough", async () => {
+			const blocks = await markdownToBlocks("이건 ~~취소선~~ 이야")
+			expect(strikeTexts(blocks)).toEqual(["취소선"])
+		})
+	})
 })
