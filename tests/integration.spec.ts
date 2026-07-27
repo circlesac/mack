@@ -62,7 +62,7 @@ a **b** _c_ **_d_ e**
 		})
 
 		// Heading
-		expect(actual[1]).toStrictEqual(slack.header("heading a"))
+		expect(actual[1]).toStrictEqual(slack.header("heading a", 1))
 
 		// Markdown image
 		expect(actual[2]).toStrictEqual(slack.image("https://user-images.githubusercontent.com/16073505/123464383-b8715300-d5ba-11eb-8586-b1f965e1f18d.jpg", "59953191-480px"))
@@ -432,14 +432,17 @@ if (a === 'hi') {
 
 			expect(headerBlocks[0]).toMatchObject({
 				type: "header",
+				level: 1,
 				text: { type: "plain_text", text: "Hello World" }
 			})
 			expect(headerBlocks[1]).toMatchObject({
 				type: "header",
+				level: 2,
 				text: { type: "plain_text", text: "Subheading" }
 			})
 			expect(headerBlocks[2]).toMatchObject({
 				type: "header",
+				level: 3,
 				text: { type: "plain_text", text: "Sub-subheading" }
 			})
 		})

@@ -9,6 +9,8 @@ import { MAX_BLOCKS, validateBlockCount, validateInput } from "./validation"
 export { BlockLimitError, MackError, ParseError, SecurityError, ValidationError } from "./errors"
 export type {
 	ColumnSetting,
+	HeaderLevel,
+	LeveledHeaderBlock,
 	RichTextBlock,
 	RichTextBroadcastElement,
 	RichTextChannelElement,
@@ -35,7 +37,7 @@ export { escapeMarkdownCodeForSlackText }
 
 /**
  * Parses Markdown content into Slack BlockKit Blocks.
- * - Supports headings (all Markdown heading levels are treated as the single Slack header block)
+ * - Supports headings (Markdown levels 1-4 map to Slack header levels; levels 5-6 map to level 4)
  * - Supports numbered lists, bulleted lists, to-do lists (as rich_text_list blocks)
  * - Supports italics, bold, strikethrough, inline code, hyperlinks
  * - Supports images
