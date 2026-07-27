@@ -95,11 +95,29 @@ export async function markdownToBlocks(body: string, options: ParsingOptions = {
 		return { type: "codespan", raw: cap[0], text }
 	}
 
+	// Override del to require the GFM-standard DOUBLE tilde (~~strike~~).
+	// marked's default GFM tokenizer also treats a SINGLE ~ as strikethrough,
+	// which wrecks numeric/other ranges: two ranges on one line (e.g.
+	// "3~4주차: 40~50분") pair their tildes into a del span ("4주차: 40").
+	// Ranges written with a single ~ are common (Korean/Japanese prose,
+	// "9~18시", "월~금"), so restrict strikethrough to ~~…~~ and let a lone
+	// ~ fall through as literal text.
+	const origDel = tokenizer.del
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	tokenizer.del = function (this: any, src: string) {
+		const cap = /^~~(?=\S)([\s\S]*?\S)~~/.exec(src)
+		if (!cap) {
+			return undefined
+		}
+		return { type: "del", raw: cap[0], text: cap[1], tokens: this.lexer.inlineTokens(cap[1]) }
+	}
+
 	const tokens = lexer.lex(body)
 
 	// Restore overridden tokenizers to avoid polluting marked.defaults
 	tokenizer.inlineText = origInlineText
 	tokenizer.codespan = origCodespan
+	tokenizer.del = origDel
 
 	const blocks = parseBlocks(tokens, options)
 
